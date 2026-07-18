@@ -22,7 +22,7 @@ A full-stack lead generation platform with a React frontend and Express API back
 | **Frontend** | Vite + React 19 + TypeScript + Tailwind CSS |
 | **Backend** | Express 5 + TypeScript |
 | **Scraper** | Python + FastAPI + ScrapeGraphAI (OpenAI + Playwright) |
-| **Database** | SQLite (via Prisma ORM) |
+| **Database** | PostgreSQL (via Prisma ORM) |
 | **Auth** | JWT (bcryptjs) |
 | **Email** | Nodemailer (SMTP) |
 | **Deployment** | Docker + docker-compose |
@@ -50,7 +50,9 @@ Scraper runs on http://localhost:8000
 ### 2. Backend
 
 ```bash
+docker compose up db -d   # local Postgres
 cd backend
+cp .env.example .env
 npm install
 npx prisma generate
 npx prisma db push
@@ -89,10 +91,24 @@ FROM_EMAIL=noreply@prospectpro.com
 docker compose up -d
 ```
 
-This starts all three services:
+This starts all services:
 - **Frontend** on port 80 (nginx)
 - **Backend** on port 3001
 - **Scraper** (internal, ScrapeGraphAI + Playwright)
+- **PostgreSQL** database
+
+## Deploy to Render (free)
+
+The repo includes a `render.yaml` blueprint that deploys everything on Render's free tier.
+
+1. Create a free Postgres database at [neon.tech](https://neon.tech) and copy its connection string.
+2. Get your OpenAI API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys).
+3. On [render.com](https://render.com): **New → Blueprint**, connect this GitHub repo.
+4. When prompted, paste `DATABASE_URL` (Neon string) and `OPENAI_API_KEY`.
+5. Deploy — your app will be live at `https://leadgenpro.onrender.com` (or similar).
+
+Free-tier notes: services sleep after 15 min idle (first request takes ~1 min to wake), and the
+scraper's 512 MB RAM can be tight for large lead counts — upgrade that one service if it OOMs.
 
 ### Environment Variables
 

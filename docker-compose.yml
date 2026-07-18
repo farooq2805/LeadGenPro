@@ -1,4 +1,16 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=leadgen
+      - POSTGRES_PASSWORD=leadgen
+      - POSTGRES_DB=leadgen
+    ports:
+      - "5432:5432"
+    volumes:
+      - prospectpro-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
   backend:
     build:
       context: .
@@ -7,7 +19,7 @@ services:
       - "3001:3001"
     environment:
       - PORT=3001
-      - DATABASE_URL=file:./prisma/dev.db
+      - DATABASE_URL=postgresql://leadgen:leadgen@db:5432/leadgen
       - JWT_SECRET=${JWT_SECRET:-change-this-secret-in-production}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost:80}
       - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
@@ -16,9 +28,8 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - FROM_EMAIL=${FROM_EMAIL:-noreply@prospectpro.com}
       - SCRAPER_URL=http://scraper:8000
-    volumes:
-      - prospectpro-data:/app/backend/prisma
     depends_on:
+      - db
       - scraper
     restart: unless-stopped
 

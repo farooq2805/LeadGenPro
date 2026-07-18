@@ -1,0 +1,38 @@
+# Render.com blueprint — deploys LeadGenPro on the free tier.
+# App service bundles the built frontend + Express API in one container;
+# the scraper runs ScrapeGraphAI separately.
+#
+# Required manual env vars (set when Render prompts during blueprint deploy):
+#   leadgenpro:          DATABASE_URL   — Postgres connection string (free tier: https://neon.tech)
+#   leadgenpro-scraper:  OPENAI_API_KEY — from https://platform.openai.com/api-keys
+services:
+  - type: web
+    name: leadgenpro
+    runtime: docker
+    dockerfilePath: ./Dockerfile.backend
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SCRAPER_URL
+        fromService:
+          type: web
+          name: leadgenpro-scraper
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: SCRAPER_TIMEOUT_MS
+        value: "600000"
+
+  - type: web
+    name: leadgenpro-scraper
+    runtime: docker
+    dockerfilePath: ./Dockerfile.scraper
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-4o-mini
