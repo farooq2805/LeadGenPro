@@ -10,16 +10,63 @@ export default function Results() {
 
   useEffect(() => {
     if (!id) return;
-    api.leads.get(id)
-      .then(setData)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const poll = async () => {
+      try {
+        const result = await api.leads.get(id);
+        if (cancelled) return;
+        setData(result);
+        setLoading(false);
+        if (result.status === 'processing' || result.status === 'pending') {
+          timer = setTimeout(poll, 4000);
+        }
+      } catch (err: any) {
+        if (cancelled) return;
+        setError(err.message);
+        setLoading(false);
+      }
+    };
+
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [id]);
 
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary-500" />
+      </div>
+    );
+  }
+
+  if (data && (data.status === 'processing' || data.status === 'pending')) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center max-w-md px-4">
+          <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-primary-500 mx-auto mb-6" />
+          <h2 className="text-xl font-semibold text-white mb-2">Finding your leads…</h2>
+          <p className="text-gray-400 text-sm">
+            We're searching the web and extracting leads matching your criteria. This usually takes 1–3 minutes.
+            You can leave this page — we'll email you when your leads are ready.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (data && data.status === 'failed') {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="text-center max-w-md px-4">
+          <p className="text-red-400 mb-2 font-medium">Lead generation failed</p>
+          <p className="text-gray-400 text-sm mb-6">{data.error || 'Something went wrong. No credits were charged.'}</p>
+          <Link to="/generate" className="gradient-btn px-5 py-2.5 rounded-lg text-sm inline-block">Try Again</Link>
+        </div>
       </div>
     );
   }

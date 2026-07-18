@@ -6,7 +6,8 @@ A full-stack lead generation platform with a React frontend and Express API back
 
 ## Features
 
-- **AI-Powered Lead Generation** — Describe your ideal customer and get targeted leads
+- **Real AI Web Scraping** — Powered by [ScrapeGraphAI](https://github.com/ScrapeGraphAI/Scrapegraph-ai): describe your ideal customer and the scraper searches the web, visits matching pages, and extracts real lead data (only publicly listed contact info — nothing fabricated)
+- **Fair Billing** — Credits are only charged for leads actually delivered; failed searches cost nothing
 - **50 Free Leads** — Every new user gets 50 free leads, no credit card required
 - **Pay As You Go** — $0.20 per lead after free credits, no subscriptions
 - **CSV Export** — Download your leads with one click
@@ -20,6 +21,7 @@ A full-stack lead generation platform with a React frontend and Express API back
 |-------|-----------|
 | **Frontend** | Vite + React 19 + TypeScript + Tailwind CSS |
 | **Backend** | Express 5 + TypeScript |
+| **Scraper** | Python + FastAPI + ScrapeGraphAI (OpenAI + Playwright) |
 | **Database** | SQLite (via Prisma ORM) |
 | **Auth** | JWT (bcryptjs) |
 | **Email** | Nodemailer (SMTP) |
@@ -31,8 +33,21 @@ A full-stack lead generation platform with a React frontend and Express API back
 
 - Node.js 18+
 - npm
+- Python 3.10+ (for the scraper service)
+- An OpenAI API key (powers the scraping LLM — `gpt-4o-mini` keeps costs to fractions of a cent per query)
 
-### 1. Backend
+### 1. Scraper service
+
+```bash
+cd scraper
+pip install -r requirements.txt
+playwright install chromium
+OPENAI_API_KEY=sk-... uvicorn main:app --port 8000
+```
+
+Scraper runs on http://localhost:8000
+
+### 2. Backend
 
 ```bash
 cd backend
@@ -44,7 +59,7 @@ npm run dev
 
 API runs on http://localhost:3001
 
-### 2. Frontend
+### 3. Frontend
 
 ```bash
 cd frontend
@@ -54,7 +69,7 @@ npm run dev
 
 Frontend runs on http://localhost:5173 — it proxies `/api` to the backend.
 
-### 3. Configure Email (optional)
+### 4. Configure Email (optional)
 
 Copy `backend/.env.example` to `backend/.env` and set SMTP credentials:
 
@@ -74,9 +89,10 @@ FROM_EMAIL=noreply@prospectpro.com
 docker compose up -d
 ```
 
-This starts both services:
+This starts all three services:
 - **Frontend** on port 80 (nginx)
 - **Backend** on port 3001
+- **Scraper** (internal, ScrapeGraphAI + Playwright)
 
 ### Environment Variables
 
@@ -85,6 +101,8 @@ Copy `.env.example` to `.env` and configure:
 ```
 JWT_SECRET=your-secret-key
 CORS_ORIGIN=http://localhost
+OPENAI_API_KEY=sk-...        # required for lead generation
+OPENAI_MODEL=gpt-4o-mini
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=
@@ -99,7 +117,7 @@ FROM_EMAIL=noreply@prospectpro.com
 | POST | `/api/auth/signup` | No | Create account |
 | POST | `/api/auth/login` | No | Sign in |
 | GET | `/api/auth/me` | Yes | Get profile |
-| POST | `/api/leads/generate` | Yes | Generate leads |
+| POST | `/api/leads/generate` | Yes | Start lead generation (returns 202, poll `/api/leads/:id` for status) |
 | GET | `/api/leads` | Yes | List queries |
 | GET | `/api/leads/:id` | Yes | Query details + leads |
 | GET | `/api/leads/:id/download` | Token | Download leads as CSV |
@@ -120,9 +138,11 @@ LeadGenPro/
 │   └── src/
 │       ├── routes/        # auth, leads, credits, orders
 │       ├── middleware/     # JWT authentication
-│       └── lib/           # Prisma client, Email service
+│       └── lib/           # Prisma client, Email service, Scraper client
+├── scraper/               # ScrapeGraphAI lead-scraping service (Python/FastAPI)
 ├── docker-compose.yml     # Production deployment
 ├── Dockerfile.frontend    # Frontend container
 ├── Dockerfile.backend     # Backend container
+├── Dockerfile.scraper     # Scraper container
 └── nginx.conf             # Reverse proxy config
 ```

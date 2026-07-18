@@ -15,8 +15,20 @@ services:
       - SMTP_USER=${SMTP_USER:-}
       - SMTP_PASS=${SMTP_PASS:-}
       - FROM_EMAIL=${FROM_EMAIL:-noreply@prospectpro.com}
+      - SCRAPER_URL=http://scraper:8000
     volumes:
       - prospectpro-data:/app/backend/prisma
+    depends_on:
+      - scraper
+    restart: unless-stopped
+
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile.scraper
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
     restart: unless-stopped
 
   frontend:

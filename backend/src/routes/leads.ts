@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { sendLeadNotification } from '../lib/email';
+import { scrapeLeads } from '../lib/scraper';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'prospectpro-jwt-secret';
 
@@ -47,49 +48,20 @@ router.post('/generate', authenticate, async (req: AuthRequest, res: Response) =
         location: data.location,
         title: data.title,
         companySize: data.companySize,
+        requestedCount: data.count,
         status: 'processing',
       },
     });
 
-    const mockLeads = generateMockLeads(data.prompt, data.count);
+    // Scraping the web takes minutes — run it in the background and let the
+    // client poll GET /api/leads/:id for status. Credits are only charged for
+    // leads actually delivered.
+    void processQuery(query.id, userId, data);
 
-    const chargeFree = Math.min(data.count, remainingFree);
-    const chargePurchased = data.count - chargeFree;
-
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        freeLeadsUsed: { increment: chargeFree },
-        purchasedLeads: { decrement: chargePurchased },
-      },
-    });
-
-    await prisma.lead.createMany({
-      data: mockLeads.map((l) => ({
-        queryId: query.id,
-        userId,
-        ...l,
-      })),
-    });
-
-    await prisma.leadQuery.update({
-      where: { id: query.id },
-      data: { status: 'completed' },
-    });
-
-    if (user.email) {
-      sendLeadNotification(user.email, user.name, data.count, query.id).catch(() => {});
-    }
-
-    const leads = await prisma.lead.findMany({ where: { queryId: query.id } });
-
-    res.status(201).json({
+    res.status(202).json({
       queryId: query.id,
-      count: leads.length,
-      leads,
-      creditsUsed: data.count,
-      freeUsed: chargeFree,
-      purchasedUsed: chargePurchased,
+      status: 'processing',
+      requestedCount: data.count,
     });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -186,24 +158,85 @@ function escapeCsv(val: string): string {
   return val;
 }
 
-function generateMockLeads(prompt: string, count: number) {
-  const industries = ['Technology', 'Healthcare', 'Finance', 'Manufacturing', 'Retail', 'SaaS', 'E-commerce'];
-  const titles = ['CEO', 'CTO', 'VP of Engineering', 'Head of Product', 'Director of Sales', 'Marketing Manager', 'Founder'];
-  const locations = ['San Francisco, CA', 'New York, NY', 'Austin, TX', 'Chicago, IL', 'Seattle, WA', 'Boston, MA', 'Denver, CO'];
-  const companies = ['TechFlow Inc', 'DataDriven Co', 'CloudScale', 'NeuralPath', 'GrowthHive', 'PixelPerfect', 'LaunchPad'];
+async function processQuery(
+  queryId: string,
+  userId: string,
+  data: { prompt: string; industry?: string; location?: string; title?: string; companySize?: string; count: number }
+) {
+  try {
+    const scraped = await scrapeLeads({
+      prompt: data.prompt,
+      industry: data.industry,
+      location: data.location,
+      title: data.title,
+      companySize: data.companySize,
+      count: data.count,
+    });
 
-  return Array.from({ length: count }, (_, i) => ({
-    name: `Lead ${i + 1} from "${prompt.slice(0, 30)}..."`,
-    email: `lead${i + 1}@example.com`,
-    phone: `+1-555-${String(1000 + i).slice(0, 4)}`,
-    company: companies[i % companies.length],
-    title: titles[i % titles.length],
-    linkedin: `https://linkedin.com/in/lead${i + 1}`,
-    website: `https://${companies[i % companies.length].toLowerCase()}.com`,
-    location: locations[i % locations.length],
-    industry: industries[i % industries.length],
-    score: Math.floor(Math.random() * 40) + 60,
-  }));
+    if (scraped.length === 0) {
+      await prisma.leadQuery.update({
+        where: { id: queryId },
+        data: {
+          status: 'failed',
+          error: 'No leads found for this search. Try a broader description — no credits were charged.',
+        },
+      });
+      return;
+    }
+
+    const delivered = scraped.slice(0, data.count);
+
+    // Re-read balances at charge time and only charge for delivered leads.
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const remainingFree = user ? Math.max(user.totalFreeLeads - user.freeLeadsUsed, 0) : 0;
+    const chargeFree = Math.min(delivered.length, remainingFree);
+    const chargePurchased = Math.min(delivered.length - chargeFree, user?.purchasedLeads ?? 0);
+
+    await prisma.$transaction([
+      prisma.lead.createMany({
+        data: delivered.map((l) => ({
+          queryId,
+          userId,
+          name: l.name,
+          email: l.email || null,
+          phone: l.phone || null,
+          company: l.company || null,
+          title: l.title || null,
+          linkedin: l.linkedin || null,
+          website: l.website || null,
+          location: l.location || null,
+          industry: l.industry || null,
+          score: l.score ?? null,
+        })),
+      }),
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          freeLeadsUsed: { increment: chargeFree },
+          purchasedLeads: { decrement: chargePurchased },
+        },
+      }),
+      prisma.leadQuery.update({
+        where: { id: queryId },
+        data: { status: 'completed', error: null },
+      }),
+    ]);
+
+    if (user?.email) {
+      sendLeadNotification(user.email, user.name, delivered.length, queryId).catch(() => {});
+    }
+  } catch (err: any) {
+    console.error(`Lead query ${queryId} failed:`, err);
+    await prisma.leadQuery
+      .update({
+        where: { id: queryId },
+        data: {
+          status: 'failed',
+          error: err?.message || 'Lead generation failed — no credits were charged.',
+        },
+      })
+      .catch(() => {});
+  }
 }
 
 export default router;
